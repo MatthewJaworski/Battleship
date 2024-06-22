@@ -1,0 +1,197 @@
+@page "{roomId}/{nickname}"
+@model BattleShip.Pages.GameModel
+@{
+    ViewData["Title"] = "Gra w Statki";
+}
+
+<h2>Gra w Statki</h2>
+
+<h3>Gracz: <span id="playerNickname">@Model.Nickname</span></h3>
+<div id="opponentNicknameContainer" style="display: none;">
+    <h3>Przeciwnik: <span id="opponentNickname"></span></h3>
+</div>
+
+<div id="gameBoard">
+    <h4>Twoja plansza</h4>
+
+    <table>
+        @for (int i = 0; i < 10; i++)
+        {
+            <tr>
+                @for (int j = 0; j < 10; j++)
+                {
+                    <td id="player-cell-@i-@j" onclick="sendMove(@i, @j)" style="pointer-events: none;">~</td>
+                }
+            </tr>
+        }
+    </table>
+    <h4 id="opponentBoardTitle" style="display: none;"></h4>
+    <table id="opponentBoard" style="display: none; pointer-events: none;">
+        @for (int i = 0; i < 10; i++)
+        {
+            <tr>
+                @for (int j = 0; j < 10; j++)
+                {
+                    <td id="opponent-cell-@i-@j">~</td>
+                }
+            </tr>
+        }
+    </table>
+</div>
+
+<div id="chat">
+    <h4>Czat</h4>
+    <div id="messagesList"></div>
+    <input type="text" id="messageInput" placeholder="Napisz wiadomość..." />
+    <button onclick="sendMessage()">Wyślij</button>
+</div>
+<button id="readyButton" onclick="toggleReady()">Jestem gotowy</button>
+<button id="leaveRoomButton" onclick="leaveRoom()">Opuść Pokój</button>
+<button id="deleteRoomButton" onclick="deleteRoom()" style="display: none;">Usuń Pokój</button>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/5.0.7/signalr.min.js"></script>
+<script>
+    const connection = new signalR.HubConnectionBuilder().withUrl("/gameHub").build();
+    const roomId = '@Model.RoomId';
+    const nickname = '@Model.Nickname';
+    let isReady = false;
+
+    connection.on("PlayerJoined", function (players) {
+        const otherPlayer = players.find(p => p !== nickname);
+        console.log("Player joined: ", otherPlayer);
+        if (otherPlayer) {
+            updateOpponentUI(otherPlayer);
+        }
+    });
+
+    connection.on("ReceivePlayers", function (players) {
+        const otherPlayer = players.find(p => p !== nickname);
+        if (otherPlayer) {
+            updateOpponentUI(otherPlayer);
+        }
+    });
+
+    connection.on("ReceiveMove", function (player, move) {
+        const [row, col] = move.split('-');
+        if (player === nickname) {
+            document.getElementById(`opponent-cell-${row}-${col}`).innerText = "X";
+        } else {
+            document.getElementById(`player-cell-${row}-${col}`).innerText = "O";
+        }
+    });
+
+    connection.on("ReceiveMessage", function (user, message) {
+        const msg = document.createElement('div');
+        msg.textContent = `${user}: ${message}`;
+        document.getElementById('messagesList').appendChild(msg);
+        console.log(`Message received from ${user}: ${message}`);
+    });
+
+    connection.on("PlayerLeft", function (player) {
+        const msg = document.createElement('div');
+        msg.textContent = `System: ${player} opuścił grę.`;
+        document.getElementById('messagesList').appendChild(msg);
+        if (player !== nickname) {
+            document.getElementById("opponentNicknameContainer").style.display = "none";
+            document.getElementById("opponentBoardTitle").style.display = "none";
+            document.getElementById("opponentBoard").style.display = "none";
+        }
+    });
+
+    connection.on("RoomDeleted", function (deletedRoomId) {
+        if (deletedRoomId === roomId) {
+            alert("Pokój został usunięty.");
+            window.location.href = `/GameList/${nickname}`;
+        }
+    });
+
+    connection.on("PlayerReadyStatus", function (player, ready) {
+        const msg = document.createElement('div');
+        msg.textContent = `System: ${player} jest ${ready ? "gotowy" : "niegotowy"}.`;
+        document.getElementById('messagesList').appendChild(msg);
+    });
+
+    connection.on("BothPlayersReady", function () {
+        document.getElementById("readyButton").style.display = "none";
+        const playerCells = document.querySelectorAll('[id^="player-cell-"]');
+        const opponentCells = document.querySelectorAll('[id^="opponent-cell-"]');
+        playerCells.forEach(cell => cell.style.pointerEvents = "auto");
+        opponentCells.forEach(cell => cell.style.pointerEvents = "auto");
+    });
+
+    connection.start().then(() => {
+        console.log("Connected to SignalR");
+        connection.invoke("JoinRoom", roomId, nickname).then(() => {
+            console.log(`Joined room ${roomId} as ${nickname}`);
+            connection.invoke("GetPlayersInRoom", roomId).then((players) => {
+                const otherPlayer = players.find(p => p !== nickname);
+                if (otherPlayer) {
+                    updateOpponentUI(otherPlayer);
+                }
+            }).catch(err => {
+                console.error("Error getting players in room: ", err.toString());
+            });
+        }).catch(err => {
+            console.error(err.toString());
+        });
+
+        // Fetch room details to determine if the current user is the owner
+        connection.invoke("GetRooms").then((rooms) => {
+            const room = rooms.find(r => r.roomId === roomId);
+            if (room && room.creator === nickname) {
+                document.getElementById("deleteRoomButton").style.display = "block";
+                document.getElementById("leaveRoomButton").style.display = "none";
+            }
+        }).catch(err => {
+            console.error(err.toString());
+        });
+    }).catch(err => {
+        console.error(err.toString());
+    });
+
+    function sendMove(row, col) {
+        const move = `${row}-${col}`;
+        connection.invoke("SendMove", roomId, nickname, move).catch(function (err) {
+            return console.error(err.toString());
+        });
+    }
+
+    function sendMessage() {
+        const message = document.getElementById('messageInput').value;
+        connection.invoke("SendMessage", roomId, nickname, message).catch(function (err) {
+            return console.error(err.toString());
+        });
+        document.getElementById('messageInput').value = '';
+        console.log(`Message sent: ${message}`);
+    }
+
+    function leaveRoom() {
+        connection.invoke("LeaveRoom", roomId, nickname).then(() => {
+            window.location.href = `/GameList/${nickname}`;
+        }).catch(err => {
+            console.error(err.toString());
+        });
+    }
+
+    function deleteRoom() {
+        connection.invoke("DeleteRoom", roomId).catch(err => {
+            console.error(err.toString());
+        });
+    }
+
+    function toggleReady() {
+        isReady = !isReady;
+        connection.invoke("SetReady", roomId, nickname, isReady).catch(function (err) {
+            return console.error(err.toString());
+        });
+        document.getElementById("readyButton").innerText = isReady ? "Nie jestem gotowy" : "Jestem gotowy";
+    }
+
+    function updateOpponentUI(player) {
+        document.getElementById("opponentNicknameContainer").style.display = "block";
+        document.getElementById("opponentNickname").innerText = player;
+        document.getElementById("opponentBoardTitle").style.display = "block";
+        document.getElementById("opponentBoardTitle").innerText = `Plansza: ${player}`;
+        document.getElementById("opponentBoard").style.display = "table";
+    }
+</script>

@@ -1,0 +1,15 @@
+﻿@page
+@model BattleShip.Pages.IndexModel
+@{
+    ViewData["Title"] = "Wybór Nicku";
+}
+
+<h2>Wybór Nicku</h2>
+
+<form method="post">
+    <div class="form-group">
+        <label for="nickname">Nick:</label>
+        <input type="text" id="nickname" name="Nickname" class="form-control" required />
+    </div>
+    <button type="submit" class="btn btn-primary">Zatwierdź</button>
+</form>

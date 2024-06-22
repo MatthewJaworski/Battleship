@@ -1,0 +1,113 @@
+@page "{nickname}"
+@model BattleShip.Pages.GameListModel
+@{
+    ViewData["Title"] = "Lista Gier";
+}
+
+<h2>Lista Gier</h2>
+
+<h3>Witaj, @Model.Nickname</h3>
+
+<button id="createRoom" onclick="createRoom()" class="btn btn-primary">Stwórz Pokój</button>
+
+<ul id="roomList">
+</ul>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/5.0.7/signalr.min.js"></script>
+<script>
+    const connection = new signalR.HubConnectionBuilder().withUrl("/gameHub").build();
+    const nickname = '@Model.Nickname';
+
+    connection.start().then(() => {
+        console.log("SignalR connection established");
+        fetchRooms();
+    }).catch(err => {
+        console.error("SignalR connection error: ", err.toString());
+    });
+
+    async function fetchRooms() {
+        try {
+            const rooms = await connection.invoke("GetRooms");
+            const roomList = document.getElementById("roomList");
+            console.log("Rooms fetched: ", rooms);
+            roomList.innerHTML = "";
+            rooms.forEach(room => {
+                addRoomToList(room);
+            });
+        } catch (err) {
+            console.error("Fetching rooms error: ", err.toString());
+        }
+    }
+
+    function createRoom() {
+        connection.invoke("CreateRoom", nickname).catch(err => {
+            console.error("Creating room error: ", err.toString());
+        });
+    }
+
+    connection.on("RedirectToGame", function (roomId, creator) {
+        console.log("Redirecting to game room: ", roomId);
+        window.location.href = `/Game/${roomId}/${creator}`;
+    });
+
+    connection.on("RoomCreated", function (room) {
+        console.log("Room created: ", room);
+        addRoomToList(room);
+    });
+
+    connection.on("RoomUpdated", function (roomId, playerCount) {
+        const listItem = document.getElementById(`room-${roomId}`);
+        if (listItem) {
+            listItem.querySelector('.playerCount').textContent = `Graczy: ${playerCount}/2`;
+            if (playerCount >= 2) {
+                listItem.querySelector('.joinButton').disabled = true;
+                listItem.querySelector('.joinButton').textContent = "Pokój pełny";
+            } else {
+                listItem.querySelector('.joinButton').disabled = false;
+                listItem.querySelector('.joinButton').textContent = "Dołącz";
+            }
+        }
+    });
+
+    connection.on("RoomDeleted", function (deletedRoomId) {
+        const listItem = document.getElementById(`room-${deletedRoomId}`);
+        if (listItem) {
+            listItem.remove();
+        }
+    });
+
+    connection.on("ErrorMessage", function (message) {
+        alert(message);
+    });
+
+    function addRoomToList(room) {
+        const roomList = document.getElementById("roomList");
+        const listItem = document.createElement("li");
+        listItem.id = `room-${room.roomId}`;
+        console.log("Adding room to list: ", room);
+
+        // Ensure players array is defined and has length
+        const playerCount = room.players ? room.players.length : 0;
+
+        listItem.innerHTML = `
+            Pokój stworzony przez ${room.creator} - <span class="playerCount">Graczy: ${playerCount}/2</span>
+            <button class="joinButton" ${playerCount >= 2 ? 'disabled' : ''} onclick="joinRoom('${room.roomId}')">
+                ${playerCount >= 2 ? 'Pokój pełny' : 'Dołącz'}
+            </button>
+        `;
+        console.log("List item: ", listItem);
+
+        try {
+            roomList.appendChild(listItem);
+            console.log("List item appended successfully");
+        } catch (error) {
+            console.error("Error appending list item: ", error);
+        }
+    }
+
+    function joinRoom(roomId) {
+        connection.invoke("JoinRoom", roomId, nickname).catch(err => {
+            console.error("Joining room error: ", err.toString());
+        });
+    }
+</script>
